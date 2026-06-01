@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VCT 2025 — Data Dashboard</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:      #0D1117;
+    --card:    #161B22;
+    --border:  #30363D;
+    --red:     #EF5350;
+    --blue:    #42A5F5;
+    --green:   #66BB6A;
+    --yellow:  #FFA726;
+    --text:    #FFFFFF;
+    --muted:   #8B949E;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; background: var(--card); border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 1.1rem; letter-spacing: .06em; color: var(--red); font-weight: 700; }
+  header span { color: var(--muted); font-size: .85rem; }
+  #clear-btn {
+    background: transparent; border: 1px solid var(--red); color: var(--red);
+    padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: .85rem; transition: background .2s;
+  }
+  #clear-btn:hover { background: var(--red); color: #fff; }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 12px; padding: 12px; height: calc(100vh - 57px);
+  }
+  .panel {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    display: flex; flex-direction: column; overflow: hidden; min-height: 340px;
+  }
+  .panel-title {
+    padding: 10px 16px; font-size: .78rem; font-weight: 600; letter-spacing: .08em;
+    color: var(--muted); border-bottom: 1px solid var(--border); text-transform: uppercase;
+  }
+  .panel-body { flex: 1; position: relative; overflow: auto; }
+  .placeholder {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 8px; color: var(--muted); font-size: .9rem;
+  }
+  .placeholder svg { opacity: .3; }
+
+  /* ---- Ficha jugador ---- */
+  .card-wrap { padding: 16px; }
+  .player-name { font-size: 1.4rem; font-weight: 700; color: var(--text); }
+  .player-sub  { font-size: .85rem; color: var(--muted); margin-bottom: 14px; }
+  .stats-grid  { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+  .stat-box { background: var(--bg); border-radius: 8px; padding: 10px; text-align: center; }
+  .stat-val { font-size: 1.3rem; font-weight: 700; }
+  .stat-lbl { font-size: .7rem; color: var(--muted); margin-top: 2px; }
+  .section-title { font-size: .75rem; font-weight: 600; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; margin: 12px 0 6px; }
+  .mini-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: .8rem; }
+  .mini-bar-label { width: 26px; color: var(--muted); text-align: right; }
+  .mini-bar-track { flex: 1; background: var(--border); border-radius: 3px; height: 8px; }
+  .mini-bar-fill  { height: 8px; border-radius: 3px; }
+  .side-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .side-pill {
+    background: var(--bg); border-radius: 6px; padding: 6px 12px; font-size: .8rem;
+    border: 1px solid var(--border);
+  }
+  .side-pill strong { display: block; font-size: 1rem; }
+
+  /* ---- Tabla comparativa ---- */
+  .comp-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  .comp-table th { color: var(--muted); font-weight: 600; padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+  .comp-table td { padding: 6px 10px; border-bottom: 1px solid #1e242c; }
+  .comp-table tr:last-child td { border-bottom: none; }
+  .badge { display: inline-block; background: var(--bg); border-radius: 4px; padding: 2px 7px; font-size: .72rem; color: var(--blue); border: 1px solid var(--border); }
+
+  #loading { position: fixed; inset: 0; background: rgba(13,17,23,.85); display: flex; align-items: center; justify-content: center; z-index: 999; font-size: 1rem; color: var(--muted); }
+  #loading.hidden { display: none; }
+</style>
+</head>
+<body>
+
+<div id="loading">Cargando datos PCA…</div>
+
+<header>
+  <h1>VCT 2025 &#9670; Data Dashboard</h1>
+  <span id="status-bar">Haz clic en un punto para explorar un jugador. <kbd>Ctrl+clic</kbd> para comparar varios.</span>
+  <button id="clear-btn" onclick="clearSelection()">Limpiar selección</button>
+</header>
+
+<div class="grid">
+  <div class="panel" id="panel-a1">
+    <div class="panel-title">Mapa PCA — Jugadores</div>
+    <div class="panel-body" id="plot-pca"></div>
+  </div>
+
+  <div class="panel" id="panel-a2">
+    <div class="panel-title" id="a2-title">Atributos</div>
+    <div class="panel-body" id="plot-attr">
+      <div class="placeholder">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Selecciona un jugador en el mapa PCA
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-a3">
+    <div class="panel-title">Ficha del jugador</div>
+    <div class="panel-body" id="ficha-content">
+      <div class="placeholder">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+        Selecciona un jugador en el mapa PCA
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-a4">
+    <div class="panel-title">Radar de métricas</div>
+    <div class="panel-body" id="plot-radar">
+      <div class="placeholder">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg>
+        Selecciona un jugador en el mapa PCA
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = "http://localhost:5000/api";
+const COLORS = ["#EF5350","#42A5F5","#66BB6A","#FFA726","#AB47BC","#26C6DA","#EC407A","#8D6E63"];
+const DARK = { paper_bgcolor:"#161B22", plot_bgcolor:"#0D1117", font:{ color:"#FFFFFF", size:11 } };
+const MARGIN = { l:50, r:20, t:30, b:50 };
+
+let pcaData   = [];
+let loadings  = [];
+let selected  = [];   // array of player names
+
+// ─── Init ───────────────────────────────────────────────────────────────────
+async function init() {
+  const [pca, ld] = await Promise.all([
+    fetch(`${API}/pca`).then(r => r.json()),
+    fetch(`${API}/pca/loadings`).then(r => r.json()),
+  ]);
+  pcaData  = pca;
+  loadings = ld;
+  document.getElementById("loading").classList.add("hidden");
+  renderPCA();
+}
+
+// ─── A1 – Scatter PCA ───────────────────────────────────────────────────────
+function renderPCA() {
+  const x      = pcaData.map(d => d.pc1);
+  const y      = pcaData.map(d => d.pc2);
+  const colors = pcaData.map(d => d.rating ?? 0);
+  const sizes  = normArr(pcaData.map(d => d.acs ?? 100), 8, 22);
+  const texts  = pcaData.map(d =>
+    `<b>${d.player}</b><br>${d.team}<br>Rating: ${fmt(d.rating)}<br>ACS: ${fmt(d.acs)}<br>${d.tournament}`
+  );
+
+  const trace = {
+    type: "scatter", mode: "markers",
+    x, y,
+    marker: {
+      color: colors, colorscale: [
+        [0,"#42A5F5"],[0.33,"#66BB6A"],[0.66,"#FFA726"],[1,"#EF5350"]
+      ],
+      size: sizes, showscale: true,
+      colorbar: { title:"Rating", thickness:12, len:0.7, tickfont:{size:10} },
+      line: { color:"#30363D", width:0.5 },
+    },
+    text: texts, hovertemplate: "%{text}<extra></extra>",
+    customdata: pcaData.map(d => d.player),
+  };
+
+  const layout = {
+    ...DARK, margin: MARGIN,
+    xaxis: { title:"PC1", gridcolor:"#21262D", zeroline:false },
+    yaxis: { title:"PC2", gridcolor:"#21262D", zeroline:false },
+    dragmode: "pan", hovermode: "closest",
+  };
+
+  Plotly.newPlot("plot-pca", [trace], layout, { responsive:true, displayModeBar:false });
+
+  document.getElementById("plot-pca").on("plotly_click", (evData) => {
+    const pt = evData.points[0];
+    const name = pt.customdata;
+    const ctrl = evData.event.ctrlKey || evData.event.metaKey;
+
+    if (ctrl) {
+      if (!selected.includes(name)) selected.push(name);
+    } else {
+      selected = [name];
+    }
+    highlightPCA();
+    fetchAndRender();
+  });
+}
+
+function normArr(arr, lo, hi) {
+  const mn = Math.min(...arr), mx = Math.max(...arr);
+  if (mx === mn) return arr.map(() => (lo + hi) / 2);
+  return arr.map(v => lo + ((v - mn) / (mx - mn)) * (hi - lo));
+}
+function fmt(v, d=2) { return v != null ? (+v).toFixed(d) : "–"; }
+
+function highlightPCA() {
+  const sizes = pcaData.map(d =>
+    selected.includes(d.player) ? 18 : 8
+  );
+  const lines = pcaData.map(d =>
+    selected.includes(d.player)
+      ? { color:"#FFFFFF", width:2 }
+      : { color:"#30363D", width:0.5 }
+  );
+  Plotly.restyle("plot-pca", {
+    "marker.size": [normArr(pcaData.map(d => d.acs ?? 100), 8, 22).map((s,i) =>
+      selected.includes(pcaData[i].player) ? Math.max(s, 16) : s
+    )],
+    "marker.line": [lines],
+  });
+}
+
+// ─── Fetch & dispatch ────────────────────────────────────────────────────────
+async function fetchAndRender() {
+  document.getElementById("status-bar").textContent =
+    selected.length === 1
+      ? `Jugador: ${selected[0]}`
+      : `Comparando: ${selected.join(", ")}`;
+
+  if (selected.length === 1) {
+    const data = await fetch(`${API}/player/${encodeURIComponent(selected[0])}`).then(r => r.json());
+    renderAttrSingle(data);
+    renderFichaSingle(data, selected[0]);
+    renderRadarSingle(data, selected[0]);
+  } else {
+    const data = await fetch(`${API}/compare`, {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ players: selected }),
+    }).then(r => r.json());
+    renderAttrMulti(data);
+    renderFichaMulti(data);
+    renderRadarMulti(data);
+  }
+}
+
+// ─── A2 single ───────────────────────────────────────────────────────────────
+function renderAttrSingle(data) {
+  document.getElementById("a2-title").textContent = "Posición vs. resto del campo";
+  const stat = data.players_stats.find(r => r["Agents"] && r["Agents"].includes(","));
+  if (!stat) { setPlaceholder("plot-attr","Sin datos agregados"); return; }
+
+  // top 2 features by absolute loading on pc1
+  const sorted = [...loadings].sort((a,b) => Math.abs(b.pc1) - Math.abs(a.pc1));
+  const f1 = sorted[0].feature;
+  const f2 = sorted[1].feature;
+
+  const allX = pcaData.map(d => d[f1]);
+  const allY = pcaData.map(d => d[f2]);
+  const names = pcaData.map(d => d.player);
+
+  const playerX = parseFloat(stat[f1]) || 0;
+  const playerY = parseFloat(stat[f2]) || 0;
+
+  const traceAll = {
+    type:"scatter", mode:"markers", name:"Otros",
+    x: allX, y: allY, text: names,
+    marker:{ color:"#30363D", size:6 },
+    hovertemplate:"%{text}<extra></extra>",
+  };
+  const tracePlayer = {
+    type:"scatter", mode:"markers", name: selected[0],
+    x:[playerX], y:[playerY],
+    marker:{ color:"#EF5350", size:14, symbol:"star" },
+    hovertemplate:`${selected[0]}<extra></extra>`,
+  };
+
+  Plotly.newPlot("plot-attr", [traceAll, tracePlayer], {
+    ...DARK, margin: MARGIN,
+    xaxis:{ title: f1, gridcolor:"#21262D", zeroline:false },
+    yaxis:{ title: f2, gridcolor:"#21262D", zeroline:false },
+    legend:{ bgcolor:"transparent" },
+  }, { responsive:true, displayModeBar:false });
+}
+
+// ─── A2 multi ────────────────────────────────────────────────────────────────
+function renderAttrMulti(data) {
+  document.getElementById("a2-title").textContent = "Comparación de métricas clave";
+  const metrics = ["Rating","Average Combat Score","Kills Per Round","Average Damage Per Round","Kill, Assist, Trade, Survive %","First Kills Per Round"];
+  const labels  = ["Rating","ACS","Kills/R","ADR","KAST%","FK/R"];
+
+  const traces = data.map((p, i) => ({
+    type:"bar", name: p.player,
+    x: labels,
+    y: metrics.map(m => p[m] ?? 0),
+    marker:{ color: COLORS[i % COLORS.length] },
+  }));
+
+  Plotly.newPlot("plot-attr", traces, {
+    ...DARK, margin: MARGIN, barmode:"group",
+    xaxis:{ gridcolor:"#21262D" },
+    yaxis:{ gridcolor:"#21262D" },
+    legend:{ bgcolor:"transparent" },
+  }, { responsive:true, displayModeBar:false });
+}
+
+// ─── A3 single ───────────────────────────────────────────────────────────────
+function renderFichaSingle(data, name) {
+  const stat = data.players_stats.find(r => r["Agents"] && r["Agents"].includes(","));
+  if (!stat) { setInner("ficha-content", `<div class="card-wrap"><p style="color:var(--muted)">Sin datos.</p></div>`); return; }
+
+  const kast = stat["Kill, Assist, Trade, Survive %"];
+  const kastDisplay = kast ? (parseFloat(kast) < 2 ? (parseFloat(kast)*100).toFixed(0)+"%" : kast) : "–";
+
+  let killsHtml = "";
+  if (data.kills_stats && data.kills_stats.length > 0) {
+    const ks = data.kills_stats[0];
+    const vals = { "2k": +ks["2k"]||0, "3k": +ks["3k"]||0, "4k": +ks["4k"]||0, "5k": +ks["5k"]||0 };
+    const maxK = Math.max(...Object.values(vals), 1);
+    killsHtml = `<div class="section-title">Multi-kills</div>`;
+    for (const [k,v] of Object.entries(vals)) {
+      const pct = (v / maxK * 100).toFixed(0);
+      const col = k==="5k"?"#EF5350":k==="4k"?"#FFA726":k==="3k"?"#66BB6A":"#42A5F5";
+      killsHtml += `<div class="mini-bar-row">
+        <span class="mini-bar-label">${k}</span>
+        <div class="mini-bar-track"><div class="mini-bar-fill" style="width:${pct}%;background:${col}"></div></div>
+        <span style="color:var(--muted);font-size:.78rem;min-width:22px">${v}</span>
+      </div>`;
+    }
+  }
+
+  let sideHtml = "";
+  if (data.overview && data.overview.length > 0) {
+    const sides = {};
+    for (const r of data.overview) {
+      const s = r["Side"] || "both";
+      if (!sides[s]) sides[s] = { kills:0, deaths:0, n:0 };
+      sides[s].kills  += +(r["Kills"]||0);
+      sides[s].deaths += +(r["Deaths"]||0);
+      sides[s].n++;
+    }
+    sideHtml = `<div class="section-title">Rendimiento por lado</div><div class="side-row">`;
+    for (const [side, v] of Object.entries(sides)) {
+      const kd = v.deaths ? (v.kills/v.deaths).toFixed(2) : "∞";
+      const sideLabel = side==="attack"?"Ataque":side==="defend"?"Defensa":"Ambos";
+      sideHtml += `<div class="side-pill"><span style="color:var(--muted);font-size:.7rem">${sideLabel}</span><strong>KD ${kd}</strong><span style="color:var(--muted);font-size:.72rem">${v.kills}K / ${v.deaths}D</span></div>`;
+    }
+    sideHtml += `</div>`;
+  }
+
+  setInner("ficha-content", `<div class="card-wrap">
+    <div class="player-name">${name}</div>
+    <div class="player-sub">${stat["Teams"]||""} &middot; ${stat["Tournament"]||""} &middot; ${stat["Agents"]||""}</div>
+    <div class="stats-grid">
+      <div class="stat-box"><div class="stat-val" style="color:#EF5350">${fmt(stat["Rating"])}</div><div class="stat-lbl">Rating</div></div>
+      <div class="stat-box"><div class="stat-val" style="color:#42A5F5">${fmt(stat["Average Combat Score"],0)}</div><div class="stat-lbl">ACS</div></div>
+      <div class="stat-box"><div class="stat-val" style="color:#66BB6A">${kastDisplay}</div><div class="stat-lbl">KAST%</div></div>
+      <div class="stat-box"><div class="stat-val">${fmt(stat["Kills Per Round"],2)}</div><div class="stat-lbl">Kills / Round</div></div>
+      <div class="stat-box"><div class="stat-val">${fmt(stat["First Kills Per Round"],2)}</div><div class="stat-lbl">FK / Round</div></div>
+      <div class="stat-box"><div class="stat-val" style="color:#EF5350">${fmt(stat["First Deaths Per Round"],2)}</div><div class="stat-lbl">FD / Round</div></div>
+    </div>
+    ${killsHtml}
+    ${sideHtml}
+  </div>`);
+}
+
+// ─── A3 multi ────────────────────────────────────────────────────────────────
+function renderFichaMulti(data) {
+  const metrics = ["Rating","Average Combat Score","Kills Per Round","Average Damage Per Round","Kill, Assist, Trade, Survive %","First Kills Per Round","First Deaths Per Round"];
+  const labels  = ["Rating","ACS","Kills/R","ADR","KAST","FK/R","FD/R"];
+
+  let rows = data.map((p, i) => {
+    const color = COLORS[i % COLORS.length];
+    const cells = metrics.map(m => {
+      let v = p[m];
+      if (v == null) return `<td>–</td>`;
+      if (m === "Kill, Assist, Trade, Survive %") v = (v*100).toFixed(0)+"%";
+      else v = (+v).toFixed(2);
+      return `<td>${v}</td>`;
+    }).join("");
+    return `<tr><td><span style="color:${color};font-weight:700">${p.player}</span><br><span class="badge">${p.team}</span></td>${cells}</tr>`;
+  }).join("");
+
+  setInner("ficha-content", `<div class="card-wrap" style="overflow-x:auto">
+    <table class="comp-table">
+      <thead><tr><th>Jugador</th>${labels.map(l=>`<th>${l}</th>`).join("")}</tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`);
+}
+
+// ─── A4 single ───────────────────────────────────────────────────────────────
+function renderRadarSingle(data, name) {
+  const stat = data.players_stats.find(r => r["Agents"] && r["Agents"].includes(","));
+  if (!stat) { setPlaceholder("plot-radar","Sin datos"); return; }
+
+  const metrics = ["Rating","Average Combat Score","Kills Per Round","Average Damage Per Round","Kill, Assist, Trade, Survive %","First Kills Per Round"];
+  const labels  = ["Rating","ACS","Kills/R","ADR","KAST","FK/R"];
+
+  const allVals = metrics.map(m => pcaData.map(d => d[m] ?? 0));
+  const normalized = metrics.map((m, i) => {
+    const v = parseFloat(stat[m]) || 0;
+    const arr = allVals[i];
+    const mn = Math.min(...arr), mx = Math.max(...arr);
+    return mx > mn ? (v - mn)/(mx - mn) : 0;
+  });
+
+  const theta = [...labels, labels[0]];
+  const r     = [...normalized, normalized[0]];
+
+  Plotly.newPlot("plot-radar", [{
+    type:"scatterpolar", mode:"lines+markers", fill:"toself",
+    r, theta, name,
+    line:{ color:"#EF5350", width:2 },
+    fillcolor:"rgba(239,83,80,0.15)",
+    marker:{ color:"#EF5350", size:5 },
+  }], {
+    ...DARK, margin:{ l:50, r:50, t:40, b:40 },
+    polar:{
+      bgcolor:"#0D1117",
+      radialaxis:{ range:[0,1], gridcolor:"#30363D", tickfont:{size:9}, showticklabels:false },
+      angularaxis:{ gridcolor:"#30363D" },
+    },
+    legend:{ bgcolor:"transparent" },
+  }, { responsive:true, displayModeBar:false });
+}
+
+// ─── A4 multi ────────────────────────────────────────────────────────────────
+function renderRadarMulti(data) {
+  const metrics = ["Rating","Average Combat Score","Kills Per Round","Average Damage Per Round","Kill, Assist, Trade, Survive %","First Kills Per Round"];
+  const labels  = ["Rating","ACS","Kills/R","ADR","KAST","FK/R"];
+
+  const traces = data.map((p, i) => {
+    const vals = metrics.map(m => p[m + "_norm"] ?? 0);
+    const theta = [...labels, labels[0]];
+    const r     = [...vals, vals[0]];
+    return {
+      type:"scatterpolar", mode:"lines+markers", fill:"toself",
+      r, theta, name:`${p.player} (${p.team})`,
+      line:{ color: COLORS[i % COLORS.length], width:2 },
+      fillcolor: hexToRgba(COLORS[i % COLORS.length], 0.1),
+      marker:{ color: COLORS[i % COLORS.length], size:5 },
+    };
+  });
+
+  Plotly.newPlot("plot-radar", traces, {
+    ...DARK, margin:{ l:50, r:50, t:40, b:40 },
+    polar:{
+      bgcolor:"#0D1117",
+      radialaxis:{ range:[0,1], gridcolor:"#30363D", tickfont:{size:9}, showticklabels:false },
+      angularaxis:{ gridcolor:"#30363D" },
+    },
+    legend:{ bgcolor:"transparent", font:{size:10} },
+  }, { responsive:true, displayModeBar:false });
+}
+
+// ─── Clear ───────────────────────────────────────────────────────────────────
+function clearSelection() {
+  selected = [];
+  document.getElementById("status-bar").textContent =
+    "Haz clic en un punto para explorar un jugador. Ctrl+clic para comparar varios.";
+  highlightPCA();
+  setPlaceholder("plot-attr","Selecciona un jugador en el mapa PCA");
+  setInner("ficha-content", placeholderHtml("M4 20c0-4 3.6-7 8-7s8 3 8 7","Selecciona un jugador en el mapa PCA","circle cx=\"12\" cy=\"8\" r=\"4\"/><path d"));
+  setPlaceholder("plot-radar","Selecciona un jugador en el mapa PCA");
+
+  // re-render placeholders properly
+  document.getElementById("ficha-content").innerHTML = `<div class="placeholder">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+    Selecciona un jugador en el mapa PCA
+  </div>`;
+  document.getElementById("plot-attr").innerHTML = `<div class="placeholder">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+    Selecciona un jugador en el mapa PCA
+  </div>`;
+  document.getElementById("plot-radar").innerHTML = `<div class="placeholder">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg>
+    Selecciona un jugador en el mapa PCA
+  </div>`;
+  document.getElementById("a2-title").textContent = "Atributos";
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function setInner(id, html) { document.getElementById(id).innerHTML = html; }
+function setPlaceholder(id, msg) {
+  document.getElementById(id).innerHTML = `<div class="placeholder">${msg}</div>`;
+}
+function hexToRgba(hex, a) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+init();
+</script>
+</body>
+</html>
