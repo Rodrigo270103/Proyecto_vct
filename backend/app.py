@@ -152,19 +152,31 @@ def player_detail(player_name):
         if col in agg_rows.columns:
             agg_rows[col] = pd.to_numeric(agg_rows[col], errors="coerce")
 
+    # Impute NaN with global median so players with sparse data still get a value
+    all_agg = df[df["Agents"].str.contains(",", na=False)].copy()
+    for col in PCT_COLS:
+        if col in all_agg.columns:
+            all_agg[col] = pct_to_float(all_agg[col])
+    for col in num_cols:
+        if col in all_agg.columns:
+            all_agg[col] = pd.to_numeric(all_agg[col], errors="coerce")
+        if col in agg_rows.columns and agg_rows[col].isna().any():
+            global_median = all_agg[col].median()
+            agg_rows[col] = agg_rows[col].fillna(global_median)
+
     def safe_mean(col):
         if col not in agg_rows.columns or agg_rows[col].isna().all():
-            return None
+            return 0.0
         return float(agg_rows[col].mean())
 
     def safe_max(col):
         if col not in agg_rows.columns or agg_rows[col].isna().all():
-            return None
+            return 0.0
         return float(agg_rows[col].max())
 
     def safe_min(col):
         if col not in agg_rows.columns or agg_rows[col].isna().all():
-            return None
+            return 0.0
         return float(agg_rows[col].min())
 
     teams       = sorted(p_rows["Teams"].dropna().unique().tolist())
