@@ -130,20 +130,84 @@ def pca_loadings():
 @app.route("/api/player/<player_name>")
 def player_detail(player_name):
     df = load_players()
-    ov = load_overview()
     ki = load_kills()
 
-    p_rows = df[df["Player"].str.lower() == player_name.lower()]
-    o_rows = ov[ov["Player"].str.lower() == player_name.lower()]
-    k_rows = ki[ki["Player"].str.lower() == player_name.lower()]
+    p_rows = df[df["Player"].str.lower() == player_name.lower()].copy()
+    if p_rows.empty:
+        return jsonify({"error": "Player not found"}), 404
 
-    def clean(frame):
-        return frame.where(pd.notnull(frame), None).to_dict(orient="records")
+    for col in PCT_COLS:
+        if col in p_rows.columns:
+            p_rows[col] = pct_to_float(p_rows[col])
+
+    # Only aggregated rows (multi-agent) represent full-tournament stats
+    agg_rows = p_rows[p_rows["Agents"].str.contains(",", na=False)].copy()
+
+    num_cols = [
+        "Rating", "Average Combat Score", "Kills Per Round",
+        "Average Damage Per Round", "Kill, Assist, Trade, Survive %",
+        "First Kills Per Round", "First Deaths Per Round", "Headshot %",
+    ]
+    for col in num_cols:
+        if col in agg_rows.columns:
+            agg_rows[col] = pd.to_numeric(agg_rows[col], errors="coerce")
+
+    def safe_mean(col):
+        if col not in agg_rows.columns or agg_rows[col].isna().all():
+            return None
+        return float(agg_rows[col].mean())
+
+    def safe_max(col):
+        if col not in agg_rows.columns or agg_rows[col].isna().all():
+            return None
+        return float(agg_rows[col].max())
+
+    def safe_min(col):
+        if col not in agg_rows.columns or agg_rows[col].isna().all():
+            return None
+        return float(agg_rows[col].min())
+
+    teams       = sorted(p_rows["Teams"].dropna().unique().tolist())
+    tournaments = sorted(p_rows["Tournament"].dropna().unique().tolist())
+
+    all_agents = set()
+    for agents_str in p_rows["Agents"].dropna():
+        for a in agents_str.split(","):
+            a = a.strip()
+            if a:
+                all_agents.add(a)
+    agents = sorted(all_agents)
+
+    k_rows = ki[ki["Player"].str.lower() == player_name.lower()].copy()
+    kills_agg = None
+    if not k_rows.empty:
+        for col in ["2k", "3k", "4k", "5k"]:
+            if col in k_rows.columns:
+                k_rows[col] = pd.to_numeric(k_rows[col], errors="coerce").fillna(0)
+        kills_agg = {
+            "2k": int(k_rows["2k"].sum()) if "2k" in k_rows.columns else 0,
+            "3k": int(k_rows["3k"].sum()) if "3k" in k_rows.columns else 0,
+            "4k": int(k_rows["4k"].sum()) if "4k" in k_rows.columns else 0,
+            "5k": int(k_rows["5k"].sum()) if "5k" in k_rows.columns else 0,
+        }
 
     return jsonify({
-        "players_stats": clean(p_rows),
-        "overview": clean(o_rows),
-        "kills_stats": clean(k_rows),
+        "player":           p_rows["Player"].iloc[0],
+        "teams":            teams,
+        "tournaments":      tournaments,
+        "agents":           agents,
+        "avg_rating":       safe_mean("Rating"),
+        "max_rating":       safe_max("Rating"),
+        "min_rating":       safe_min("Rating"),
+        "avg_acs":          safe_mean("Average Combat Score"),
+        "avg_kpr":          safe_mean("Kills Per Round"),
+        "avg_adr":          safe_mean("Average Damage Per Round"),
+        "avg_kast":         safe_mean("Kill, Assist, Trade, Survive %"),
+        "avg_fkr":          safe_mean("First Kills Per Round"),
+        "avg_fdr":          safe_mean("First Deaths Per Round"),
+        "avg_headshot":     safe_mean("Headshot %"),
+        "total_tournaments": len(tournaments),
+        "kills_stats":      kills_agg,
     })
 
 
@@ -165,26 +229,34 @@ def compare():
         "First Kills Per Round",
     ]
 
-    selected = agg[agg["Player"].str.lower().isin(names)].copy()
-    for col in COMPARE_COLS:
-        selected[col] = pd.to_numeric(selected[col], errors="coerce")
-
-    # Normalize 0-1 across all agg players for radar
     for col in COMPARE_COLS:
         agg[col] = pd.to_numeric(agg[col], errors="coerce")
+
+    selected_all = agg[agg["Player"].str.lower().isin(names)].copy()
+
+    # One row per player: average all numeric metrics across their records
+    grouped = selected_all.groupby("Player")[COMPARE_COLS].mean().reset_index()
+
+    # Attach first-seen team/tournament metadata
+    meta = (selected_all.groupby("Player")
+            .agg(Teams=("Teams", "first"), Tournament=("Tournament", "first"))
+            .reset_index())
+    grouped = grouped.merge(meta, on="Player", how="left")
+
+    # Normalize 0-1 relative to the full player pool
+    for col in COMPARE_COLS:
         mn, mx = agg[col].min(), agg[col].max()
         if mx != mn:
-            selected[col + "_norm"] = (selected[col] - mn) / (mx - mn)
+            grouped[col + "_norm"] = ((grouped[col] - mn) / (mx - mn)).clip(0, 1)
         else:
-            selected[col + "_norm"] = 0.5
+            grouped[col + "_norm"] = 0.5
 
     result = []
-    for _, row in selected.iterrows():
+    for _, row in grouped.iterrows():
         entry = {
-            "player": row["Player"],
-            "team": row.get("Teams", ""),
+            "player":     row["Player"],
+            "team":       row.get("Teams", ""),
             "tournament": row.get("Tournament", ""),
-            "agents": row.get("Agents", ""),
         }
         for col in COMPARE_COLS:
             entry[col] = float(row[col]) if not pd.isna(row[col]) else None
