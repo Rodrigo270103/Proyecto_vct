@@ -10,6 +10,8 @@ import os
 app = Flask(__name__)
 CORS(app)
 
+_cache = {}   # in-memory cache for expensive computations
+
 BASE     = os.path.dirname(__file__)
 PLAYERS  = os.path.join(BASE, "../vct_2025/players_stats/players_stats.csv")
 AGENTS   = os.path.join(BASE, "../vct_2025/agents/agents_pick_rates.csv")
@@ -164,6 +166,9 @@ def fv(series, key):
 
 @app.route("/api/pca")
 def pca_endpoint():
+    if "pca" in _cache:
+        return jsonify(_cache["pca"])
+
     merged = build_enriched_player_df()
     feats  = [f for f in PCA_FEATURES if f in merged.columns]
 
@@ -212,12 +217,14 @@ def pca_endpoint():
             entry[feat] = fv(imp_row, feat)
         points.append(entry)
 
-    ev = pca.explained_variance_ratio_.tolist()
-    return jsonify({
+    ev     = pca.explained_variance_ratio_.tolist()
+    result = {
         "points":                   points,
         "explained_variance":       ev,
         "total_variance_explained": float(sum(ev)),
-    })
+    }
+    _cache["pca"] = result
+    return jsonify(result)
 
 
 @app.route("/api/pca/loadings")
@@ -240,6 +247,56 @@ def pca_loadings():
         result.append({"feature": feat, "pc1": p1, "pc2": p2,
                         "importance": float(np.sqrt(p1**2 + p2**2))})
     result.sort(key=lambda x: x["importance"], reverse=True)
+    return jsonify(result)
+
+
+@app.route("/api/umap")
+def umap_endpoint():
+    if "umap" in _cache:
+        return jsonify(_cache["umap"])
+
+    import umap as umap_lib
+
+    merged = build_enriched_player_df()
+    feats  = [f for f in PCA_FEATURES if f in merged.columns]
+
+    X     = merged[feats].copy().apply(pd.to_numeric, errors="coerce")
+    imp   = SimpleImputer(strategy="median")
+    X_imp = imp.fit_transform(X)
+    sc    = StandardScaler()
+    X_sc  = sc.fit_transform(X_imp)
+
+    reducer = umap_lib.UMAP(n_components=2, n_neighbors=15, min_dist=0.1, random_state=42)
+    coords  = reducer.fit_transform(X_sc)
+    X_df    = pd.DataFrame(X_imp, columns=feats)
+
+    points = []
+    for i, row in merged.reset_index(drop=True).iterrows():
+        imp_row = X_df.iloc[i]
+        role_id = int(row["agent_role"]) if pd.notna(row.get("agent_role")) else 4
+        entry = {
+            "id":            i,
+            "player":        str(row.get("Player", "")),
+            "team":          str(row.get("team", "")),
+            "tournament":    str(row.get("tournament", "")),
+            "agents":        str(row.get("agents", "")),
+            "rating":        fv(imp_row, "Rating"),
+            "umap1":         float(coords[i, 0]),
+            "umap2":         float(coords[i, 1]),
+            "agent_role":    role_id,
+            "role_name":     ROLE_NAMES.get(role_id, "Centinela"),
+            "avg_acs":       fv(imp_row, "Average Combat Score"),
+            "avg_kpr":       fv(imp_row, "Kills Per Round"),
+            "avg_adr":       fv(imp_row, "Average Damage Per Round"),
+            "avg_kast":      fv(imp_row, "Kill, Assist, Trade, Survive %"),
+            "avg_fkr":       fv(imp_row, "First Kills Per Round"),
+            "rating_attack": fv(imp_row, "rating_attack"),
+            "rating_defend": fv(imp_row, "rating_defend"),
+        }
+        points.append(entry)
+
+    result = {"points": points}
+    _cache["umap"] = result
     return jsonify(result)
 
 
