@@ -66,10 +66,12 @@
   select.role-sel:focus { outline: none; border-color: var(--blue); }
 
   .panel-body { flex: 1; position: relative; overflow: hidden; min-height: 0; }
+  .plot-area   { position: absolute; inset: 0; }
+
   .placeholder {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     flex-direction: column; gap: 8px; color: var(--muted); font-size: .88rem;
-    text-align: center; padding: 16px; line-height: 1.5;
+    text-align: center; padding: 16px; line-height: 1.5; pointer-events: none;
   }
   .placeholder svg { opacity: .3; }
 
@@ -83,12 +85,19 @@
   .ep-cols { display: flex; flex-wrap: wrap; gap: 0 20px; padding-left: 12px; list-style: disc; }
   .ep-cols li { min-width: 240px; }
 
-  /* Spinner */
+  /* Spinner overlay */
+  .spinner-overlay {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 8px; background: var(--card); z-index: 10; pointer-events: none;
+  }
+  .spinner-overlay.hidden { display: none; }
   .spinner {
     width: 28px; height: 28px;
     border: 3px solid var(--border); border-top-color: var(--blue);
     border-radius: 50%; animation: spin .75s linear infinite;
   }
+  .spinner-overlay span { color: var(--muted); font-size: .82rem; }
+  .spinner-overlay small { color: var(--muted); font-size: .72rem; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
   /* Comparison table */
@@ -130,7 +139,9 @@
       </select>
     </div>
     <div id="variance-info"></div>
-    <div class="panel-body" id="plot-pca"></div>
+    <div class="panel-body">
+      <div id="plot-pca" class="plot-area"></div>
+    </div>
   </div>
 
   <!-- A2: UMAP -->
@@ -149,12 +160,14 @@
       UMAP agrupa jugadores por similitud de comportamiento &nbsp;·&nbsp;
       Puntos cercanos = patrones similares en las 24 variables
     </div>
-    <div class="panel-body" id="plot-umap">
-      <div class="placeholder" id="umap-loading">
+    <div class="panel-body">
+      <!-- spinner is a sibling overlay, NOT inside the plot div -->
+      <div id="umap-spinner" class="spinner-overlay">
         <div class="spinner"></div>
         <span>Calculando UMAP…</span>
-        <span style="font-size:.74rem">Puede tardar 20–30 s la primera vez</span>
+        <small>Puede tardar 20–30 s la primera vez</small>
       </div>
+      <div id="plot-umap" class="plot-area"></div>
     </div>
     <div class="explain-panel">
       <b>¿Cómo leer este mapa?</b>
@@ -170,16 +183,17 @@
   <!-- A3: Coordenadas Paralelas -->
   <div class="panel">
     <div class="panel-title">Coordenadas Paralelas — Perfil de Jugadores</div>
-    <div class="panel-body" id="plot-parallel"></div>
+    <div class="panel-body">
+      <div id="plot-parallel" class="plot-area"></div>
+    </div>
     <div class="explain-panel">
       <b>¿Cómo leer este gráfico?</b>
       <ul class="ep-cols">
         <li>Cada eje vertical = una variable de rendimiento</li>
-        <li>Cada línea horizontal = un jugador</li>
+        <li>Cada línea = un jugador · coloreada cuando es seleccionado</li>
         <li>Líneas arriba en todos los ejes = jugador élite</li>
         <li>Cruce hacia abajo en un eje = debilidad en esa variable</li>
         <li>Líneas paralelas entre seleccionados = perfiles similares</li>
-        <li>Líneas que se cruzan = perfiles opuestos en esas variables</li>
       </ul>
     </div>
   </div>
@@ -187,10 +201,12 @@
   <!-- A4: Radar -->
   <div class="panel">
     <div class="panel-title">Radar de métricas</div>
-    <div class="panel-body" id="plot-radar">
-      <div class="placeholder">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg>
-        Selecciona un jugador en A1 o A2
+    <div class="panel-body">
+      <div id="plot-radar" class="plot-area">
+        <div class="placeholder">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg>
+          Selecciona un jugador en A1 o A2
+        </div>
       </div>
     </div>
   </div>
@@ -210,51 +226,47 @@ const ROLE_META = [
   { id:4, name:"Centinela",   color:"#66BB6A" },
 ];
 
-// Parallel-coords axes (key in pcaData → display label)
+// Parallel-coords axes
 const PC_KEYS   = ["rating","avg_acs","avg_kpr","avg_adr","avg_kast","avg_fkr","avg_fdr","rating_attack","rating_defend","multi_kills_3k","spike_plants","spike_defuses"];
 const PC_LABELS = ["Rating","ACS","Kills/R","ADR","KAST%","FK/R","FD/R","R.Ataque","R.Defensa","3K","Plantas","Defuses"];
 
-// Colorscale: role_id 1–4 mapped with cmin=1 cmax=4
-const PC_COLORSCALE = [
-  [0,    "#EF5350"],[0.28, "#EF5350"],
-  [0.29, "#42A5F5"],[0.61, "#42A5F5"],
-  [0.62, "#AB47BC"],[0.94, "#AB47BC"],
-  [0.95, "#66BB6A"],[1.0,  "#66BB6A"],
-];
-
 // State
-let pcaData  = [];
-let umapData = [];
-let evRatio  = [0,0];
-let selected = [];
-let pcaRole  = 0;
-let umapRole = 0;
-let pcNorms  = null;   // min/max per PC_KEY
+let pcaData   = [];
+let umapData  = [];
+let evRatio   = [0, 0];
+let selected  = [];
+let pcaRole   = 0;
+let umapRole  = 0;
+let pcNorms   = null;
+
+// Track whether plots have been initialized (so we can use react vs newPlot)
+let pcaReady  = false;
+let umapReady = false;
+let pcReady   = false;
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 async function init() {
-  const [pca] = await Promise.all([
-    fetch(`${API}/pca`).then(r => r.json()),
-  ]);
-  pcaData = pca.points;
-  evRatio = pca.explained_variance;
-  pcNorms = computePCNorms();
+  const pca = await fetch(`${API}/pca`).then(r => r.json());
+  pcaData  = pca.points;
+  evRatio  = pca.explained_variance;
+  pcNorms  = computePCNorms();
 
   document.getElementById("loading").classList.add("hidden");
   updateVarianceInfo();
   renderPCA();
   renderParallelCoords();
-  loadUMAP();       // async, shows spinner
+  loadUMAP();
 }
 
 async function loadUMAP() {
   try {
     const res = await fetch(`${API}/umap`).then(r => r.json());
     umapData = res.points;
+    document.getElementById("umap-spinner").classList.add("hidden");
     renderUMAP();
-  } catch {
-    document.getElementById("plot-umap").innerHTML =
-      `<div class="placeholder" style="color:var(--red)">Error cargando UMAP</div>`;
+  } catch(e) {
+    document.getElementById("umap-spinner").innerHTML =
+      `<span style="color:var(--red)">Error cargando UMAP: ${e.message}</span>`;
   }
 }
 
@@ -278,8 +290,9 @@ function buildScatterTraces(data, xKey, yKey, roleFilter) {
 
   return roles.map(role => {
     const rd = filt.filter(d => d.agent_role === role.id);
+    const isSel = rd.map(d => selected.includes(d.player));
     return {
-      type:"scatter", mode:"markers", name: role.name,
+      type: "scatter", mode: "markers", name: role.name,
       x: rd.map(d => d[xKey]),
       y: rd.map(d => d[yKey]),
       text: rd.map(d =>
@@ -289,22 +302,30 @@ function buildScatterTraces(data, xKey, yKey, roleFilter) {
       customdata: rd.map(d => d.player),
       marker: {
         color:   role.color,
-        size:    rd.map(d => selected.includes(d.player) ? Math.max(sz(d.rating ?? 1), 16) : sz(d.rating ?? 1)),
-        line:    rd.map(d => selected.includes(d.player)
-          ? { color:"#FFFFFF", width:2 }
-          : { color:"rgba(0,0,0,0.35)", width:0.5 }),
+        size:    rd.map((d, i) => isSel[i] ? Math.max(sz(d.rating ?? 1), 16) : sz(d.rating ?? 1)),
         opacity: 0.87,
+        line: {
+          color: rd.map((_, i) => isSel[i] ? "#FFFFFF" : "rgba(0,0,0,0.35)"),
+          width: rd.map((_, i) => isSel[i] ? 2 : 0.5),
+        },
       },
     };
   });
 }
 
-function attachClickHandler(divId, dataArr) {
-  document.getElementById(divId).on("plotly_click", ev => {
+function attachClickHandler(divId) {
+  const el = document.getElementById(divId);
+  if (!el) return;
+  el.on("plotly_click", ev => {
+    if (!ev || !ev.points || !ev.points[0]) return;
     const name = ev.points[0].customdata;
-    const ctrl = ev.event.ctrlKey || ev.event.metaKey;
-    if (ctrl) { if (!selected.includes(name)) selected.push(name); }
-    else { selected = [name]; }
+    if (!name) return;
+    const ctrl = ev.event && (ev.event.ctrlKey || ev.event.metaKey);
+    if (ctrl) {
+      if (!selected.includes(name)) selected.push(name);
+    } else {
+      selected = [name];
+    }
     onSelectionChange();
   });
 }
@@ -312,18 +333,27 @@ function attachClickHandler(divId, dataArr) {
 // ─── A1 – PCA ────────────────────────────────────────────────────────────────
 function renderPCA() {
   const traces = buildScatterTraces(pcaData, "pc1", "pc2", pcaRole);
-  Plotly.newPlot("plot-pca", traces, {
+  const layout = {
     ...DARK, margin: MARG,
     xaxis: { title:"PC1", gridcolor:"#21262D", zeroline:false },
     yaxis: { title:"PC2", gridcolor:"#21262D", zeroline:false },
     legend: { bgcolor:"transparent", font:{ size:10 } },
     dragmode:"pan", hovermode:"closest",
-  }, { responsive:true, displayModeBar:false });
-  attachClickHandler("plot-pca", pcaData);
+  };
+  const config = { responsive:true, displayModeBar:false };
+
+  if (!pcaReady) {
+    Plotly.newPlot("plot-pca", traces, layout, config);
+    attachClickHandler("plot-pca");
+    pcaReady = true;
+  } else {
+    Plotly.react("plot-pca", traces, layout, config);
+  }
 }
 
 function onPCARoleChange() {
   pcaRole = parseInt(document.getElementById("pca-role-sel").value);
+  pcaReady = false;  // force newPlot to re-attach handlers after role change
   renderPCA();
 }
 
@@ -331,18 +361,27 @@ function onPCARoleChange() {
 function renderUMAP() {
   if (!umapData.length) return;
   const traces = buildScatterTraces(umapData, "umap1", "umap2", umapRole);
-  Plotly.newPlot("plot-umap", traces, {
+  const layout = {
     ...DARK, margin: MARG,
     xaxis: { title:"UMAP 1", gridcolor:"#21262D", zeroline:false, showticklabels:false },
     yaxis: { title:"UMAP 2", gridcolor:"#21262D", zeroline:false, showticklabels:false },
     legend: { bgcolor:"transparent", font:{ size:10 } },
     dragmode:"pan", hovermode:"closest",
-  }, { responsive:true, displayModeBar:false });
-  attachClickHandler("plot-umap", umapData);
+  };
+  const config = { responsive:true, displayModeBar:false };
+
+  if (!umapReady) {
+    Plotly.newPlot("plot-umap", traces, layout, config);
+    attachClickHandler("plot-umap");
+    umapReady = true;
+  } else {
+    Plotly.react("plot-umap", traces, layout, config);
+  }
 }
 
 function onUMAPRoleChange() {
   umapRole = parseInt(document.getElementById("umap-role-sel").value);
+  umapReady = false;  // force newPlot to re-attach handlers after role change
   renderUMAP();
 }
 
@@ -379,46 +418,59 @@ function makeDimensions(rows) {
 function renderParallelCoords() {
   if (!pcNorms) return;
 
-  const hasSel    = selected.length > 0;
-  const bgOpacity = hasSel ? 0.07 : 0.18;
+  const hasSel = selected.length > 0;
 
-  const traces = [{
-    type:       "parcoords",
-    line:       { color:"#8B949E" },
-    opacity:    bgOpacity,
+  // Single trace: encode selection state as numeric value mapped via colorscale
+  // 0 = unselected/background, 1-4 = role id (selected players only)
+  const lineValues = pcaData.map(d => {
+    if (!hasSel) return 0;
+    return selected.includes(d.player) ? d.agent_role : 0;
+  });
+
+  // Unselected lines: dim gray; selected: role color
+  const unselAlpha = hasSel ? "0.05" : "0.15";
+  const unselColor = `rgba(139,148,158,${unselAlpha})`;
+
+  // Colorscale: 0 → gray (background), then bands for roles 1-4
+  // cmin=0, cmax=4 → each integer maps to a band
+  const cs = [
+    [0,      unselColor],
+    [0.199,  unselColor],
+    [0.200,  "#EF5350"],   // role 1 Duelista
+    [0.449,  "#EF5350"],
+    [0.450,  "#42A5F5"],   // role 2 Iniciador
+    [0.699,  "#42A5F5"],
+    [0.700,  "#AB47BC"],   // role 3 Controlador
+    [0.949,  "#AB47BC"],
+    [0.950,  "#66BB6A"],   // role 4 Centinela
+    [1.000,  "#66BB6A"],
+  ];
+
+  const trace = {
+    type: "parcoords",
+    line: {
+      color:      lineValues,
+      colorscale: cs,
+      cmin: 0, cmax: 4,
+      showscale:  false,
+    },
     dimensions: makeDimensions(pcaData),
-    showlegend: false,
-  }];
+  };
 
-  if (hasSel) {
-    const selRows = pcaData.filter(d => selected.includes(d.player));
-    if (selRows.length) {
-      traces.push({
-        type: "parcoords",
-        line: {
-          color:      selRows.map(d => d.agent_role),
-          colorscale: PC_COLORSCALE,
-          cmin: 1, cmax: 4,
-          showscale: false,
-        },
-        dimensions: makeDimensions(selRows),
-        showlegend: false,
-      });
-    }
-  }
-
-  Plotly.newPlot("plot-parallel", traces, {
+  // Always purge parcoords to reset brush-filter state on update
+  Plotly.purge("plot-parallel");
+  Plotly.newPlot("plot-parallel", [trace], {
     ...DARK,
-    margin: { l:50, r:50, t:55, b:55 },
+    margin: { l:60, r:60, t:55, b:55 },
   }, { responsive:true, displayModeBar:false });
 }
 
 // ─── A4 – Radar single ───────────────────────────────────────────────────────
 function renderRadarSingle(data) {
-  const name      = data.player;
-  const PKEYS     = ["rating","avg_acs","avg_kpr","avg_adr","avg_kast","avg_fkr"];
-  const DKEYS     = ["avg_rating","avg_acs","avg_kpr","avg_adr","avg_kast","avg_fkr"];
-  const LABELS    = ["Rating","ACS","Kills/R","ADR","KAST","FK/R"];
+  const name   = data.player;
+  const PKEYS  = ["rating","avg_acs","avg_kpr","avg_adr","avg_kast","avg_fkr"];
+  const DKEYS  = ["avg_rating","avg_acs","avg_kpr","avg_adr","avg_kast","avg_fkr"];
+  const LABELS = ["Rating","ACS","Kills/R","ADR","KAST","FK/R"];
 
   const normalized = DKEYS.map((dk, i) => {
     const v   = data[dk] ?? 0;
