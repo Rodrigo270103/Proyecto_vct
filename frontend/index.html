@@ -100,6 +100,42 @@
   .spinner-overlay small { color: var(--muted); font-size: .72rem; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
+  /* Player search */
+  .search-bar {
+    padding: 5px 14px 6px; border-bottom: 1px solid var(--border);
+    background: var(--panel2); flex-shrink: 0;
+  }
+  .search-wrap { position: relative; }
+  .search-wrap input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 5px; color: var(--text); padding: 4px 28px 4px 10px;
+    font-size: .78rem; outline: none; transition: border-color .15s;
+  }
+  .search-wrap input::placeholder { color: var(--muted); }
+  .search-wrap input:focus { border-color: var(--blue); }
+  .search-clear {
+    position: absolute; right: 7px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    font-size: .9rem; line-height: 1; display: none; padding: 0;
+  }
+  .search-clear.visible { display: block; }
+  .suggestions {
+    position: absolute; top: calc(100% + 3px); left: 0; right: 0;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 6px; max-height: 180px; overflow-y: auto; z-index: 200;
+    display: none; box-shadow: 0 6px 20px rgba(0,0,0,.45);
+  }
+  .suggestions.open { display: block; }
+  .sug-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 10px; font-size: .78rem; cursor: pointer;
+    border-bottom: 1px solid #1e242c;
+  }
+  .sug-item:last-child { border-bottom: none; }
+  .sug-item:hover, .sug-item.active { background: var(--panel2); }
+  .sug-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .sug-team { color: var(--muted); font-size: .7rem; margin-left: auto; white-space: nowrap; }
+
   /* Comparison table */
   .comp-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
   .comp-table th { color: var(--muted); font-weight: 600; padding: 5px 7px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
@@ -139,6 +175,13 @@
       </select>
     </div>
     <div id="variance-info"></div>
+    <div class="search-bar">
+      <div class="search-wrap">
+        <input id="pca-search" type="text" placeholder="Buscar jugador…" autocomplete="off" spellcheck="false" />
+        <button class="search-clear" id="pca-search-clear" tabindex="-1">&#x2715;</button>
+        <div id="pca-suggestions" class="suggestions"></div>
+      </div>
+    </div>
     <div class="panel-body">
       <div id="plot-pca" class="plot-area"></div>
     </div>
@@ -263,6 +306,7 @@ async function init() {
   updateVarianceInfo();
   renderPCA();
   renderParallelCoords();
+  initSearch();
   loadUMAP();
 }
 
@@ -635,6 +679,110 @@ async function fetchAndRenderRadar() {
 function clearSelection() {
   selected = [];
   onSelectionChange();
+}
+
+// ─── Player search (A1) ───────────────────────────────────────────────────────
+function initSearch() {
+  const input  = document.getElementById("pca-search");
+  const box    = document.getElementById("pca-suggestions");
+  const clearB = document.getElementById("pca-search-clear");
+  let activeIdx = -1;
+
+  function closeSuggestions() {
+    box.classList.remove("open");
+    activeIdx = -1;
+  }
+
+  function selectPlayer(name, addToSel) {
+    if (addToSel) {
+      if (!selected.includes(name)) selected.push(name);
+    } else {
+      selected = [name];
+    }
+    input.value = "";
+    clearB.classList.remove("visible");
+    closeSuggestions();
+    onSelectionChange();
+  }
+
+  function renderSuggestions(q) {
+    if (!q) { closeSuggestions(); return; }
+    const matches = pcaData
+      .filter(d => d.player.toLowerCase().includes(q))
+      .sort((a, b) => {
+        // Exact prefix first
+        const aP = a.player.toLowerCase().startsWith(q);
+        const bP = b.player.toLowerCase().startsWith(q);
+        if (aP && !bP) return -1;
+        if (!aP && bP) return 1;
+        return a.player.localeCompare(b.player);
+      })
+      .slice(0, 12);
+
+    if (!matches.length) { closeSuggestions(); return; }
+
+    box.innerHTML = matches.map((d, i) => {
+      const color = ROLE_META.find(r => r.id === d.agent_role)?.color ?? "#8B949E";
+      const hi    = d.player.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, "gi"),
+                      "<b style='color:var(--text)'>$1</b>");
+      return `<div class="sug-item" data-player="${d.player}" data-idx="${i}">
+        <div class="sug-dot" style="background:${color}"></div>
+        <span>${hi}</span>
+        <span class="sug-team">${d.team}</span>
+      </div>`;
+    }).join("");
+
+    box.querySelectorAll(".sug-item").forEach(el => {
+      el.addEventListener("mousedown", e => {
+        e.preventDefault();
+        selectPlayer(el.dataset.player, e.ctrlKey || e.metaKey);
+      });
+    });
+
+    activeIdx = -1;
+    box.classList.add("open");
+  }
+
+  input.addEventListener("input", () => {
+    const q = input.value.trim().toLowerCase();
+    clearB.classList.toggle("visible", input.value.length > 0);
+    renderSuggestions(q);
+  });
+
+  input.addEventListener("keydown", e => {
+    const items = box.querySelectorAll(".sug-item");
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      activeIdx = Math.min(activeIdx + 1, items.length - 1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      activeIdx = Math.max(activeIdx - 1, -1);
+    } else if (e.key === "Enter") {
+      if (activeIdx >= 0 && items[activeIdx]) {
+        e.preventDefault();
+        selectPlayer(items[activeIdx].dataset.player, e.ctrlKey || e.metaKey);
+      }
+      return;
+    } else if (e.key === "Escape") {
+      closeSuggestions();
+      input.blur();
+      return;
+    } else { return; }
+
+    // Update active highlight
+    items.forEach((el, i) => el.classList.toggle("active", i === activeIdx));
+    if (activeIdx >= 0) items[activeIdx]?.scrollIntoView({ block:"nearest" });
+  });
+
+  clearB.addEventListener("mousedown", e => {
+    e.preventDefault();
+    input.value = "";
+    clearB.classList.remove("visible");
+    closeSuggestions();
+    input.focus();
+  });
+
+  input.addEventListener("blur", () => setTimeout(closeSuggestions, 150));
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
