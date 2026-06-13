@@ -184,6 +184,14 @@
   <div class="panel">
     <div class="panel-title">Coordenadas Paralelas — Perfil de Jugadores</div>
     <div class="panel-body">
+      <div id="pc-placeholder" class="placeholder" style="font-size:.84rem;gap:12px;">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+          <line x1="4" y1="4" x2="4" y2="20"/><line x1="10" y1="4" x2="10" y2="20"/>
+          <line x1="16" y1="4" x2="16" y2="20"/><line x1="22" y1="4" x2="22" y2="20"/>
+          <polyline points="4,14 10,8 16,16 22,10" stroke-dasharray="3 2"/>
+        </svg>
+        Selecciona jugadores en el mapa PCA o UMAP para ver su perfil
+      </div>
       <div id="plot-parallel" class="plot-area"></div>
     </div>
     <div class="explain-panel">
@@ -401,8 +409,31 @@ function normPC(v, k) {
   return max === min ? 0.5 : Math.max(0, Math.min(1, (v - min)/(max - min)));
 }
 
-function makeDimensions(rows) {
+function makeStaticDimensions() {
+  // Axes with real-value tick labels but no data (empty state)
   return PC_KEYS.map((k, i) => {
+    const { min, max } = pcNorms[k];
+    const mid = (min + max) / 2;
+    return {
+      label:    PC_LABELS[i],
+      values:   [],
+      range:    [0, 1],
+      tickvals: [0, 0.5, 1],
+      ticktext: [fmt(min,2), fmt(mid,2), fmt(max,2)],
+    };
+  });
+}
+
+function makeSelDimensions(rows) {
+  // Name axis first, then metric axes
+  const nameDim = {
+    label:    "Jugador",
+    values:   rows.map((_, i) => i),
+    range:    [-0.5, Math.max(rows.length - 0.5, 0.5)],
+    tickvals: rows.map((_, i) => i),
+    ticktext: rows.map(d => d.player),
+  };
+  const metricDims = PC_KEYS.map((k, i) => {
     const { min, max } = pcNorms[k];
     const mid = (min + max) / 2;
     return {
@@ -413,51 +444,70 @@ function makeDimensions(rows) {
       ticktext: [fmt(min,2), fmt(mid,2), fmt(max,2)],
     };
   });
+  return [nameDim, ...metricDims];
+}
+
+function buildSelColorscale(rows) {
+  // Build a stepped colorscale so each player line gets its own role color.
+  // Player i has normalized value i/(n-1) in cmin=0, cmax=n-1 space.
+  const n = rows.length;
+  const getColor = d => ROLE_META.find(r => r.id === d.agent_role)?.color ?? "#8B949E";
+  if (n === 1) {
+    const c = getColor(rows[0]);
+    return { cs: [[0, c], [1, c]], cmin: 0, cmax: 1 };
+  }
+  const eps = 0.0015;
+  const cs = [];
+  for (let i = 0; i < n; i++) {
+    const c  = getColor(rows[i]);
+    const lo = i === 0     ? 0 : (i - 0.5) / (n - 1) + eps;
+    const hi = i === n - 1 ? 1 : (i + 0.5) / (n - 1) - eps;
+    cs.push([lo, c]);
+    cs.push([hi, c]);
+  }
+  return { cs, cmin: 0, cmax: n - 1 };
 }
 
 function renderParallelCoords() {
   if (!pcNorms) return;
 
+  const placeholder = document.getElementById("pc-placeholder");
   const hasSel = selected.length > 0;
 
-  // Single trace: encode selection state as numeric value mapped via colorscale
-  // 0 = unselected/background, 1-4 = role id (selected players only)
-  const lineValues = pcaData.map(d => {
-    if (!hasSel) return 0;
-    return selected.includes(d.player) ? d.agent_role : 0;
-  });
+  // Always show/hide the placeholder overlay
+  placeholder.style.display = hasSel ? "none" : "flex";
 
-  // Unselected lines: dim gray; selected: role color
-  const unselAlpha = hasSel ? "0.05" : "0.15";
-  const unselColor = `rgba(139,148,158,${unselAlpha})`;
+  if (!hasSel) {
+    // Empty state: render axes only (no lines), placeholder text shown above
+    Plotly.purge("plot-parallel");
+    Plotly.newPlot("plot-parallel", [{
+      type: "parcoords",
+      line: { color: [], showscale: false },
+      dimensions: makeStaticDimensions(),
+    }], {
+      ...DARK,
+      margin: { l:60, r:60, t:55, b:55 },
+    }, { responsive:true, displayModeBar:false });
+    return;
+  }
 
-  // Colorscale: 0 → gray (background), then bands for roles 1-4
-  // cmin=0, cmax=4 → each integer maps to a band
-  const cs = [
-    [0,      unselColor],
-    [0.199,  unselColor],
-    [0.200,  "#EF5350"],   // role 1 Duelista
-    [0.449,  "#EF5350"],
-    [0.450,  "#42A5F5"],   // role 2 Iniciador
-    [0.699,  "#42A5F5"],
-    [0.700,  "#AB47BC"],   // role 3 Controlador
-    [0.949,  "#AB47BC"],
-    [0.950,  "#66BB6A"],   // role 4 Centinela
-    [1.000,  "#66BB6A"],
-  ];
+  // Selection state: only selected players, role colors, no background lines
+  const selRows = pcaData.filter(d => selected.includes(d.player));
+  if (!selRows.length) return;
+
+  const { cs, cmin, cmax } = buildSelColorscale(selRows);
 
   const trace = {
     type: "parcoords",
     line: {
-      color:      lineValues,
+      color:      selRows.map((_, i) => i),
       colorscale: cs,
-      cmin: 0, cmax: 4,
+      cmin, cmax,
       showscale:  false,
     },
-    dimensions: makeDimensions(pcaData),
+    dimensions: makeSelDimensions(selRows),
   };
 
-  // Always purge parcoords to reset brush-filter state on update
   Plotly.purge("plot-parallel");
   Plotly.newPlot("plot-parallel", [trace], {
     ...DARK,
