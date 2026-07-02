@@ -5,6 +5,8 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.impute import SimpleImputer
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score as sil_score
 import os
 
 app = Flask(__name__)
@@ -438,6 +440,58 @@ def compare():
             entry[col + "_norm"] = float(row[col + "_norm"]) if not pd.isna(row[col + "_norm"]) else 0
         result.append(entry)
     return jsonify(result)
+
+
+@app.route("/api/kmeans")
+def kmeans_endpoint():
+    k = request.args.get("k", 4, type=int)
+    k = max(2, min(8, k))
+
+    # Ensure PCA cache is populated
+    if "pca" not in _cache:
+        pca_endpoint()
+
+    points = _cache["pca"]["points"]
+    coords = np.array([[p["pc1"], p["pc2"]] for p in points])
+
+    km     = KMeans(n_clusters=k, random_state=42, n_init=10)
+    labels = km.fit_predict(coords)
+    sil    = float(sil_score(coords, labels))
+
+    if sil >= 0.7:
+        sil_label = "Excelente"
+    elif sil >= 0.5:
+        sil_label = "Buena"
+    elif sil >= 0.3:
+        sil_label = "Moderada"
+    else:
+        sil_label = "Baja"
+
+    result_points = [
+        {
+            "player":    p["player"],
+            "team":      p["team"],
+            "agents":    p["agents"],
+            "rating":    p["rating"],
+            "role_name": p["role_name"],
+            "pc1":       p["pc1"],
+            "pc2":       p["pc2"],
+            "cluster":   int(labels[i]),
+        }
+        for i, p in enumerate(points)
+    ]
+    centroids = [
+        {"cluster": c, "pc1": float(km.cluster_centers_[c, 0]), "pc2": float(km.cluster_centers_[c, 1])}
+        for c in range(k)
+    ]
+
+    return jsonify({
+        "k":                k,
+        "silhouette_score": round(sil, 4),
+        "silhouette_label": sil_label,
+        "points":           result_points,
+        "centroids":        centroids,
+    })
 
 
 @app.route("/api/agents")
