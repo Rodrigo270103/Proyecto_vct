@@ -39,7 +39,7 @@ PS_FEATURES = [
     "Assists Per Round",
 ]
 KI_FEATURES = ["2k", "3k", "4k", "Spike Plants", "Spike Defuses", "1v1", "1v2", "Econ"]
-OV_FEATURES = ["rating_attack", "rating_defend", "rating_both",
+OV_FEATURES = ["rating_attack", "rating_defend",
                "attack_vs_defend", "acs_attack", "acs_defend"]
 CALC_FEATURES = ["num_agents", "agent_role"]
 PCA_FEATURES  = PS_FEATURES + KI_FEATURES + OV_FEATURES + CALC_FEATURES

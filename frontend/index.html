@@ -44,13 +44,13 @@
   #stats-bar .stt { display: flex; align-items: center; gap: 5px; }
   #stats-bar .stt b { color: var(--blue); font-weight: 600; }
 
-  .grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-template-rows: 1fr 1fr 1fr;
+  .dash {
+    display: flex; flex-direction: column;
     gap: 10px; padding: 10px;
     height: calc(100vh - 86px);
   }
+  .row { display: flex; gap: 10px; flex: 1; min-height: 0; }
+  .row > .panel { flex: 1; min-width: 0; }
   .panel {
     background: var(--card); border: 1px solid var(--border); border-radius: 10px;
     display: flex; flex-direction: column; overflow: hidden; min-height: 200px;
@@ -84,7 +84,7 @@
     height: 4px; border-radius: 2px;
   }
 
-  .panel-body { flex: 1; position: relative; overflow: hidden; min-height: 0; }
+  .panel-body { flex: 1; position: relative; overflow: hidden; min-height: 110px; }
   .plot-area   { position: absolute; inset: 0; }
 
   .placeholder {
@@ -176,6 +176,25 @@
 
   #loading { position: fixed; inset: 0; background: rgba(13,17,23,.9); display: flex; align-items: center; justify-content: center; z-index: 999; font-size: .95rem; color: var(--muted); flex-direction: column; gap: 12px; }
   #loading.hidden { display: none; }
+
+  /* Loadings panel (A1b) */
+  #loadings-body { display: flex; flex-direction: column; min-height: 0; }
+  #loadings-body > div { flex: 1; min-height: 0; position: relative; }
+
+  /* Cluster ↔ rol composition (A3) */
+  #cluster-composition {
+    padding: 5px 14px 6px; flex-shrink: 0;
+    max-height: 118px; overflow-y: auto;
+  }
+  #cluster-composition .cc-title { font-size: .68rem; color: var(--muted); margin-bottom: 4px; }
+  #cluster-composition .cc-title b { color: #CBD5E0; }
+  .cc-row { display: flex; align-items: center; gap: 10px; margin-bottom: 3px; }
+  .cc-label { font-size: .7rem; color: var(--text); width: 150px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cc-label b { color: var(--blue); }
+  .cc-bar { flex: 1; display: flex; height: 11px; border-radius: 3px; overflow: hidden; background: var(--border); }
+  .cc-seg { height: 100%; }
+  .cc-purity { font-size: .68rem; color: var(--muted); width: 130px; flex-shrink: 0; text-align: right; white-space: nowrap; }
+  .cc-purity b { color: var(--text); }
 </style>
 </head>
 <body>
@@ -199,137 +218,158 @@
   <div class="stt">Agente más usado: <b id="stat-agent">—</b></div>
 </div>
 
-<div class="grid">
+<div class="dash">
 
-  <!-- A1: PCA -->
-  <div class="panel">
-    <div class="panel-title">
-      <span>A1 — Mapa PCA</span>
-      <select id="pca-role-sel" class="role-sel" onchange="onPCARoleChange()">
-        <option value="0">Todos los roles</option>
-        <option value="1">Duelistas</option>
-        <option value="2">Iniciadores</option>
-        <option value="3">Controladores</option>
-        <option value="4">Centinelas</option>
-      </select>
-    </div>
-    <div id="variance-info"></div>
-    <div class="search-bar">
-      <div class="search-wrap">
-        <input id="pca-search" type="text" placeholder="Buscar jugador…" autocomplete="off" spellcheck="false" />
-        <button class="search-clear" id="pca-search-clear" tabindex="-1">&#x2715;</button>
-        <div id="pca-suggestions" class="suggestions"></div>
+  <div class="row" style="flex:1.15;">
+
+    <!-- A1: PCA -->
+    <div class="panel" style="flex:1.25;">
+      <div class="panel-title">
+        <span>A1 — Mapa PCA</span>
+        <select id="pca-role-sel" class="role-sel" onchange="onPCARoleChange()">
+          <option value="0">Todos los roles</option>
+          <option value="1">Duelistas</option>
+          <option value="2">Iniciadores</option>
+          <option value="3">Controladores</option>
+          <option value="4">Centinelas</option>
+        </select>
+      </div>
+      <div id="variance-info"></div>
+      <div class="search-bar">
+        <div class="search-wrap">
+          <input id="pca-search" type="text" placeholder="Buscar jugador…" autocomplete="off" spellcheck="false" />
+          <button class="search-clear" id="pca-search-clear" tabindex="-1">&#x2715;</button>
+          <div id="pca-suggestions" class="suggestions"></div>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div id="plot-pca" class="plot-area"></div>
       </div>
     </div>
-    <div class="panel-body">
-      <div id="plot-pca" class="plot-area"></div>
-    </div>
-  </div>
 
-  <!-- A2: UMAP -->
-  <div class="panel">
-    <div class="panel-title">
-      <span>A2 — Mapa UMAP</span>
-      <select id="umap-role-sel" class="role-sel" onchange="onUMAPRoleChange()">
-        <option value="0">Todos los roles</option>
-        <option value="1">Duelistas</option>
-        <option value="2">Iniciadores</option>
-        <option value="3">Controladores</option>
-        <option value="4">Centinelas</option>
-      </select>
-    </div>
-    <div class="subtitle-bar">
-      UMAP agrupa jugadores por similitud de comportamiento &nbsp;·&nbsp;
-      Puntos cercanos = patrones similares en las 24 variables
-    </div>
-    <div class="panel-body">
-      <div id="umap-spinner" class="spinner-overlay">
-        <div class="spinner"></div>
-        <span>Calculando UMAP…</span>
-        <small>Puede tardar 20–30 s la primera vez</small>
+    <!-- A1b: Loadings PCA -->
+    <div class="panel" style="flex:.85;">
+      <div class="panel-title"><span>A1b — Loadings PCA</span></div>
+      <div class="subtitle-bar">Variables que más pesan en cada eje (top 8) &nbsp;·&nbsp; azul = positivo, rojo = negativo</div>
+      <div class="panel-body" id="loadings-body">
+        <div id="plot-load-pc1"></div>
+        <div id="plot-load-pc2"></div>
       </div>
-      <div id="plot-umap" class="plot-area"></div>
     </div>
-    <div class="explain-panel">
-      <b>¿Cómo leer este mapa?</b>
-      <ul class="ep-cols">
-        <li>Mismo color = mismo rol de agente</li>
-        <li>Puntos cercanos = comportamiento similar en 24 variables</li>
-        <li>Clusters separados = perfiles de juego distintos</li>
-        <li>Posición diferente a PCA = relaciones no lineales</li>
-      </ul>
+
+    <!-- A2: UMAP -->
+    <div class="panel" style="flex:1.25;">
+      <div class="panel-title">
+        <span>A2 — Mapa UMAP</span>
+        <select id="umap-role-sel" class="role-sel" onchange="onUMAPRoleChange()">
+          <option value="0">Todos los roles</option>
+          <option value="1">Duelistas</option>
+          <option value="2">Iniciadores</option>
+          <option value="3">Controladores</option>
+          <option value="4">Centinelas</option>
+        </select>
+      </div>
+      <div class="subtitle-bar">
+        UMAP agrupa jugadores por similitud de comportamiento &nbsp;·&nbsp;
+        Puntos cercanos = patrones similares en las 24 variables
+      </div>
+      <div class="panel-body">
+        <div id="umap-spinner" class="spinner-overlay">
+          <div class="spinner"></div>
+          <span>Calculando UMAP…</span>
+          <small>Puede tardar 20–30 s la primera vez</small>
+        </div>
+        <div id="plot-umap" class="plot-area"></div>
+      </div>
+      <div class="explain-panel">
+        <b>¿Cómo leer este mapa?</b>
+        <ul class="ep-cols">
+          <li>Mismo color = mismo rol de agente</li>
+          <li>Puntos cercanos = comportamiento similar en 24 variables</li>
+          <li>Clusters separados = perfiles de juego distintos</li>
+          <li>Posición diferente a PCA = relaciones no lineales</li>
+        </ul>
+      </div>
     </div>
+
   </div>
 
   <!-- A3: K-Means Clustering (full width) -->
-  <div class="panel" style="grid-column: 1 / -1;">
-    <div class="panel-title">
-      <span>A3 — Clustering K-Means — Proyección PCA</span>
-      <div class="k-ctrl">
-        <label>K = <b id="k-label">4</b> clusters</label>
-        <input type="range" id="k-slider" min="2" max="8" value="4"
-               oninput="onKChange(this.value)" />
-      </div>
-    </div>
-    <div class="panel-body">
-      <div id="kmeans-spinner" class="spinner-overlay">
-        <div class="spinner"></div>
-        <span>Calculando clusters…</span>
-      </div>
-      <div id="plot-kmeans" class="plot-area"></div>
-    </div>
-    <div class="explain-panel" id="silhouette-bar">
-      <div class="sil-row">
-        <span>Silhouette Score: <b id="sil-score">—</b></span>
-        <div class="sil-track">
-          <div class="sil-fill" id="sil-bar-fill" style="width:50%"></div>
-          <div class="sil-zero"></div>
-        </div>
-        <span style="font-size:.65rem;white-space:nowrap;">−1 ← 0 → +1</span>
-      </div>
-      <div id="sil-desc">El Silhouette Score mide qué tan bien separados están los clusters. Valores cercanos a +1 indican clusters perfectamente separados.</div>
-    </div>
-  </div>
-
-  <!-- A4: Coordenadas Paralelas -->
-  <div class="panel">
-    <div class="panel-title">A4 — Coordenadas Paralelas — Perfil de Jugadores</div>
-    <div class="panel-body">
-      <div id="pc-placeholder" class="placeholder" style="font-size:.84rem;gap:12px;">
-        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
-          <line x1="4" y1="4" x2="4" y2="20"/><line x1="10" y1="4" x2="10" y2="20"/>
-          <line x1="16" y1="4" x2="16" y2="20"/><line x1="22" y1="4" x2="22" y2="20"/>
-          <polyline points="4,14 10,8 16,16 22,10" stroke-dasharray="3 2"/>
-        </svg>
-        Selecciona jugadores en el mapa PCA, UMAP o K-Means para ver su perfil
-      </div>
-      <div id="plot-parallel" class="plot-area"></div>
-    </div>
-    <div class="explain-panel">
-      <b>¿Cómo leer este gráfico?</b>
-      <ul class="ep-cols">
-        <li>Cada eje vertical = una variable de rendimiento</li>
-        <li>Cada línea = un jugador · coloreada según su rol</li>
-        <li>Líneas arriba en todos los ejes = jugador élite</li>
-        <li>Cruce hacia abajo en un eje = debilidad en esa variable</li>
-      </ul>
-    </div>
-  </div>
-
-  <!-- A5: Radar -->
-  <div class="panel">
-    <div class="panel-title">A5 — Radar de métricas</div>
-    <div class="panel-body">
-      <div id="plot-radar" class="plot-area">
-        <div class="placeholder">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg>
-          Selecciona un jugador en A1, A2 o A3
+  <div class="row" style="flex:1.4;">
+    <div class="panel">
+      <div class="panel-title">
+        <span>A3 — Clustering K-Means — Proyección PCA</span>
+        <div class="k-ctrl">
+          <label>K = <b id="k-label">4</b> clusters</label>
+          <input type="range" id="k-slider" min="2" max="8" value="4"
+                 oninput="onKChange(this.value)" />
         </div>
       </div>
+      <div class="panel-body">
+        <div id="kmeans-spinner" class="spinner-overlay">
+          <div class="spinner"></div>
+          <span>Calculando clusters…</span>
+        </div>
+        <div id="plot-kmeans" class="plot-area"></div>
+      </div>
+      <div class="explain-panel" id="silhouette-bar">
+        <div class="sil-row">
+          <span>Silhouette Score: <b id="sil-score">—</b></span>
+          <div class="sil-track">
+            <div class="sil-fill" id="sil-bar-fill" style="width:50%"></div>
+            <div class="sil-zero"></div>
+          </div>
+          <span style="font-size:.65rem;white-space:nowrap;">−1 ← 0 → +1</span>
+        </div>
+        <div id="sil-desc">El Silhouette Score mide qué tan bien separados están los clusters. Valores cercanos a +1 indican clusters perfectamente separados.</div>
+      </div>
+      <div id="cluster-composition"></div>
     </div>
   </div>
 
-</div><!-- .grid -->
+  <div class="row" style="flex:1;">
+
+    <!-- A4: Coordenadas Paralelas -->
+    <div class="panel">
+      <div class="panel-title">A4 — Coordenadas Paralelas — Perfil de Jugadores</div>
+      <div class="panel-body">
+        <div id="pc-placeholder" class="placeholder" style="font-size:.84rem;gap:12px;">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+            <line x1="4" y1="4" x2="4" y2="20"/><line x1="10" y1="4" x2="10" y2="20"/>
+            <line x1="16" y1="4" x2="16" y2="20"/><line x1="22" y1="4" x2="22" y2="20"/>
+            <polyline points="4,14 10,8 16,16 22,10" stroke-dasharray="3 2"/>
+          </svg>
+          Selecciona jugadores en el mapa PCA, UMAP o K-Means para ver su perfil
+        </div>
+        <div id="plot-parallel" class="plot-area"></div>
+      </div>
+      <div class="explain-panel">
+        <b>¿Cómo leer este gráfico?</b>
+        <ul class="ep-cols">
+          <li>Cada eje vertical = una variable de rendimiento</li>
+          <li>Cada línea = un jugador · coloreada según su rol</li>
+          <li>Líneas arriba en todos los ejes = jugador élite</li>
+          <li>Cruce hacia abajo en un eje = debilidad en esa variable</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- A5: Radar -->
+    <div class="panel">
+      <div class="panel-title">A5 — Radar de métricas</div>
+      <div class="panel-body">
+        <div id="plot-radar" class="plot-area">
+          <div class="placeholder">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5"/></svg>
+            Selecciona un jugador en A1, A2 o A3
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div><!-- .dash -->
 
 <script>
 const API            = "http://localhost:5000/api";
@@ -348,17 +388,45 @@ const ROLE_META = [
 const PC_KEYS   = ["rating","avg_acs","avg_kpr","avg_adr","avg_kast","avg_fkr","avg_fdr","rating_attack","rating_defend","multi_kills_3k","spike_plants","spike_defuses"];
 const PC_LABELS = ["Rating","ACS","Kills/R","ADR","KAST%","FK/R","FD/R","R.Ataque","R.Defensa","3K","Plantas","Defuses"];
 
+const FEATURE_LABELS_ES = {
+  "Rating":                              "Rating",
+  "Average Combat Score":                "ACS",
+  "Kills Per Round":                     "Kills/Ronda",
+  "Average Damage Per Round":            "ADR",
+  "Kill, Assist, Trade, Survive %":      "KAST%",
+  "First Kills Per Round":               "Primeras Muertes/Ronda",
+  "First Deaths Per Round":              "Primeras Muertes Recibidas/Ronda",
+  "Headshot %":                          "% Headshot",
+  "Assists Per Round":                   "Asistencias/Ronda",
+  "2k":                                  "Dobles (2K)",
+  "3k":                                  "Triples (3K)",
+  "4k":                                  "Cuádruples (4K)",
+  "Spike Plants":                        "Plantadas de Spike",
+  "Spike Defuses":                       "Desactivaciones de Spike",
+  "1v1":                                 "Clutches 1v1",
+  "1v2":                                 "Clutches 1v2",
+  "Econ":                                "Rating Económico",
+  "rating_attack":                       "Rating Ataque",
+  "rating_defend":                       "Rating Defensa",
+  "attack_vs_defend":                    "Diferencia Ataque−Defensa",
+  "acs_attack":                          "ACS Ataque",
+  "acs_defend":                          "ACS Defensa",
+  "num_agents":                          "N° de Agentes",
+  "agent_role":                          "Rol de Agente",
+};
+
 // State
-let pcaData  = [];
-let umapData = [];
-let evRatio  = [0, 0];
-let selected = [];
-let pcaRole  = 0;
-let umapRole = 0;
-let pcNorms  = null;
-let kmData   = null;
-let currentK = 4;
-let kDebounce = null;
+let pcaData     = [];
+let umapData    = [];
+let evRatio     = [0, 0];
+let selected    = [];
+let pcaRole     = 0;
+let umapRole    = 0;
+let pcNorms     = null;
+let kmData      = null;
+let currentK    = 4;
+let kDebounce   = null;
+let loadingsData = null;
 
 // Plot init flags
 let pcaReady   = false;
@@ -381,6 +449,17 @@ async function init() {
   initSearch();
   loadUMAP();
   loadKMeans(4);
+  loadLoadings();
+}
+
+async function loadLoadings() {
+  try {
+    loadingsData = await fetch(`${API}/pca/loadings`).then(r => r.json());
+    renderLoadings();
+  } catch(e) {
+    document.getElementById("loadings-body").innerHTML =
+      `<span style="color:var(--red);font-size:.72rem;padding:10px;">Error cargando loadings: ${e.message}</span>`;
+  }
 }
 
 async function loadUMAP() {
@@ -403,6 +482,7 @@ async function loadKMeans(k) {
     document.getElementById("kmeans-spinner").classList.add("hidden");
     renderKMeans();
     updateSilhouette(data);
+    renderClusterComposition(data);
   } catch(e) {
     document.getElementById("kmeans-spinner").innerHTML =
       `<span style="color:var(--red)">Error: ${e.message}</span>`;
@@ -437,6 +517,34 @@ function updateVarianceInfo() {
   const tot = ((evRatio[0]+evRatio[1])*100).toFixed(1);
   document.getElementById("variance-info").textContent =
     `PC1 ${p1}%  ·  PC2 ${p2}%  ·  Total varianza explicada: ${tot}%`;
+}
+
+// ─── A1b – Loadings PCA ───────────────────────────────────────────────────────
+function renderLoadings() {
+  if (!loadingsData) return;
+  const top1 = [...loadingsData].sort((a,b) => Math.abs(b.pc1) - Math.abs(a.pc1)).slice(0, 8)
+                 .sort((a,b) => a.pc1 - b.pc1);
+  const top2 = [...loadingsData].sort((a,b) => Math.abs(b.pc2) - Math.abs(a.pc2)).slice(0, 8)
+                 .sort((a,b) => a.pc2 - b.pc2);
+  plotLoadingBar("plot-load-pc1", top1, "pc1", "Contribución a PC1");
+  plotLoadingBar("plot-load-pc2", top2, "pc2", "Contribución a PC2");
+}
+
+function plotLoadingBar(divId, rows, key, title) {
+  const labels = rows.map(r => FEATURE_LABELS_ES[r.feature] || r.feature);
+  const vals   = rows.map(r => r[key]);
+  const colors = vals.map(v => v >= 0 ? "#42A5F5" : "#EF5350");
+  Plotly.newPlot(divId, [{
+    type: "bar", orientation: "h",
+    x: vals, y: labels,
+    marker: { color: colors },
+    hovertemplate: "%{y}: %{x:.3f}<extra></extra>",
+  }], {
+    ...DARK, margin: { l:150, r:16, t:22, b:22 },
+    title: { text: title, font: { size:10, color:"#8B949E" } },
+    xaxis: { gridcolor:"#21262D", zeroline:true, zerolinecolor:"#30363D", tickfont:{size:9} },
+    yaxis: { tickfont:{size:9} },
+  }, { responsive:true, displayModeBar:false });
 }
 
 // ─── Shared scatter builder ───────────────────────────────────────────────────
@@ -635,6 +743,47 @@ function updateSilhouette(data) {
   fill.style.background = color;
 }
 
+// ─── A3 – Composición por rol de cada cluster ────────────────────────────────
+function renderClusterComposition(data) {
+  const { points, k } = data;
+  const container = document.getElementById("cluster-composition");
+
+  const rows = [];
+  for (let c = 0; c < k; c++) {
+    const clPts = points.filter(d => d.cluster === c);
+    const total = clPts.length;
+    const counts = {};
+    ROLE_META.forEach(r => counts[r.name] = 0);
+    clPts.forEach(d => { counts[d.role_name] = (counts[d.role_name] || 0) + 1; });
+
+    let domRole = null, domCount = -1;
+    ROLE_META.forEach(r => { if (counts[r.name] > domCount) { domCount = counts[r.name]; domRole = r; } });
+    const purity = total > 0 ? (domCount / total * 100) : 0;
+
+    const segs = ROLE_META
+      .filter(r => counts[r.name] > 0)
+      .map(r => `<div class="cc-seg" title="${r.name}: ${counts[r.name]}" style="width:${(counts[r.name]/total*100).toFixed(2)}%;background:${r.color}"></div>`)
+      .join("");
+
+    rows.push(`
+      <div class="cc-row">
+        <div class="cc-label">Cluster ${c+1} <span style="color:var(--muted)">(${total})</span></div>
+        <div class="cc-bar">${segs}</div>
+        <div class="cc-purity"><b>${purity.toFixed(0)}%</b> ${domRole ? domRole.name : "—"}</div>
+      </div>`);
+  }
+
+  const legend = ROLE_META.map(r =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:14px;">
+       <span style="width:8px;height:8px;border-radius:50%;background:${r.color};display:inline-block;"></span>${r.name}
+     </span>`).join("");
+
+  container.innerHTML = `
+    <div class="cc-title"><b>Composición por rol de cada cluster</b> — % del rol dominante = "pureza" del cluster</div>
+    ${rows.join("")}
+    <div style="margin-top:6px;font-size:.68rem;">${legend}</div>`;
+}
+
 function onKChange(val) {
   document.getElementById("k-label").textContent = val;
   clearTimeout(kDebounce);
@@ -795,15 +944,27 @@ function renderRadarMulti(data) {
     const vals  = MCOLS.map(m => p[m+"_norm"] ?? 0);
     const theta = [...LABELS, LABELS[0]];
     const r     = [...vals, vals[0]];
-    const cd    = [...LABELS.map((l,j) => `${l}: ${fmtR(p[MCOLS[j]],j)}`),
-                   `${LABELS[0]}: ${fmtR(p[MCOLS[0]],0)}`];
-    const col   = COLORS[i % COLORS.length];
+
+    // Cruce con pcaData para exponer perfil ofensivo vs defensivo en leyenda/tooltip
+    const pd  = pcaData.find(d => d.player.toLowerCase() === p.player.toLowerCase());
+    const atk = pd?.rating_attack, def = pd?.rating_defend;
+    const advLabel = (atk != null && def != null)
+      ? `Rating Ataque: ${fmt(atk)} · Rating Defensa: ${fmt(def)}`
+      : null;
+
+    const cd = [...LABELS.map((l,j) => `${l}: ${fmtR(p[MCOLS[j]],j)}`),
+                `${LABELS[0]}: ${fmtR(p[MCOLS[0]],0)}`];
+
+    const col = COLORS[i % COLORS.length];
+    const legendName = `${p.player} (${p.team}) — Rating ${p["Rating"]!=null?(+p["Rating"]).toFixed(2):"?"}`
+      + (advLabel ? ` · Atq ${fmt(atk)} / Def ${fmt(def)}` : "");
+
     return {
       type:"scatterpolar", mode:"lines+markers", fill:"toself",
       r, theta,
-      name: `${p.player} (${p.team}) — Rating ${p["Rating"]!=null?(+p["Rating"]).toFixed(2):"?"}`,
+      name: legendName,
       customdata: cd,
-      hovertemplate: `<b>${p.player}</b><br>%{customdata}<extra></extra>`,
+      hovertemplate: `<b>${p.player}</b><br>%{customdata}` + (advLabel ? `<br>${advLabel}` : "") + `<extra></extra>`,
       line:      { color:col, width:2 },
       fillcolor: hexToRgba(col, 0.1),
       marker:    { color:col, size:5 },
